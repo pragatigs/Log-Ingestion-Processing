@@ -1,0 +1,50 @@
+{{- if .Values.worker.scaledJob.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: {{ include "log-processing.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "log-processing.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  pollingInterval: 30
+  maxReplicaCount: 10
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ .Values.worker.kafka.bootstrapServers | quote }}
+        consumerGroup: {{ .Values.worker.kafka.groupId | quote }}
+        topic: {{ .Values.worker.kafka.topic | quote }}
+        lagThreshold: "3"
+
+  jobTargetRef:
+    backoffLimit: 3
+    ttlSecondsAfterFinished: 30000
+    template:
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: worker
+            image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+            imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+            env:
+              - name: KAFKA_MAX_POLL_RECORDS
+                value: {{ .Values.worker.kafka.maxPollRecords | quote }}
+              - name: REDIS_HOST
+                value: {{ .Values.worker.redis.redisHost | quote }}
+
+            resources:
+              {{- toYaml .Values.worker.resources | nindent 14 }}
+            volumeMounts:
+              - name: log-storage
+                mountPath: /tmp
+        volumes:
+          - name: log-storage
+            hostPath:
+              path: /data/log-processing
+              type: DirectoryOrCreate
+{{- end }}

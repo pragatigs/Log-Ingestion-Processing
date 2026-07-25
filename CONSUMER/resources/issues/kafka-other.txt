@@ -1,0 +1,94 @@
+================================================================
+ISSUESSSSSSSS
+================================================================
+
+
+1. KAFKA CONSUMER SILENTLY SKIPPING EXISTING MESSAGES
+----------------------------------------------------------------
+ISSUE
+  The consumer repeatedly returned zero messages despite messages
+  being confirmed present in the topic.
+
+ROOT CAUSE
+  The "auto.offset.reset" property was missing from the consumer
+  configuration entirely. Kafka's client defaults this to "latest"
+  when unset, which tells a consumer group with no committed
+  offset to skip all existing messages and wait only for new ones.
+  Since the group had no committed offset, every run silently
+  positioned itself past all existing messages.
+
+RESOLUTION
+  Explicitly set auto.offset.reset to "earliest", so a fresh
+  consumer group starts from the beginning of the topic instead
+  of the end.
+
+LESSON
+  Kafka properties fail silently, not loudly, when left unset.
+  Explicitly set every property that affects correctness, even
+  when the default seems reasonable -- don't rely on knowing the
+  client library's internal defaults from memory.
+
+
+2. KAFKA CLIENT NOT REACHABLE FROM OUTSIDE THE CLUSTER
+----------------------------------------------------------------
+ISSUE
+  Consumer failed with UnknownHostException when run from outside
+  Kubernetes (e.g. a local machine), even after port-forwarding.
+
+ROOT CAUSE
+  Kafka's client protocol works in two steps: an initial connection
+  to the bootstrap address, followed by a broker-advertised address
+  used for all subsequent communication. Strimzi's internal listener
+  advertised in-cluster pod DNS, which only resolves inside the
+  cluster network -- unreachable from a local machine even with
+  port-forwarding, since only the first hop was tunneled.
+
+RESOLUTION
+  For local development, added a second Strimzi listener
+  (type: nodeport) with an explicit advertised host/port pinned to
+  a stable local address, tunneled via kubectl port-forward, so
+  both connection hops resolve consistently.
+  For actual deployment, the application runs inside the cluster
+  and uses the internal listener directly -- avoiding the dual-hop
+  problem entirely.
+
+LESSON
+  Kafka clients running outside the same network as the broker
+  need the broker's advertised address to also be reachable from
+  that location -- a working first connection does not guarantee
+  a working second one.
+
+
+3. DUPLICATE MESSAGE PROCESSING AFTER A FAILED COMMIT
+----------------------------------------------------------------
+ISSUE
+  A pod successfully processed and wrote a batch of messages to
+  disk, but failed while committing offsets back to Kafka. The
+  retried pod reprocessed the same messages, writing duplicate
+  entries to the output files.
+
+ROOT CAUSE
+  The failure was a CommitFailedException, caused by the consumer
+  group rebalancing before the commit request reached the broker.
+  This is a natural consequence of many short-lived, independent
+  pods joining and leaving the same consumer group in quick
+  succession under autoscaling -- a much higher rate of rebalances
+  than a typical long-running consumer would see.
+  Because file writes happened before the offset commit, a pod
+  could do real work, fail only at the commit step, and have that
+  work invisibly redone by the next attempt.
+
+RESOLUTION
+  Introduced an external, durable dedup layer (Redis) tracking
+  which exact message offsets have already been written, checked
+  before every file write and updated only after a write succeeds.
+  This makes the write step idempotent: a redelivered message that
+  was already written is detected and skipped, regardless of which
+  pod or retry attempt it arrives on.
+
+LESSON
+  When "do the work" and "confirm the work is done" are two
+  separate steps, a failure between them will always be possible.
+  The fix is not to prevent the failure, but to make the work step
+  safe to repeat.
+

@@ -1,0 +1,47 @@
+1. FILES WRITTEN INSIDE A POD DISAPPEAR WHEN THE POD EXITS
+----------------------------------------------------------------
+ISSUE
+  Output files written by a completed pod could not be found once
+  the pod was cleaned up.
+
+ROOT CAUSE
+  A pod's container filesystem is ephemeral and exists only for the
+  pod's lifetime. Files written there are not visible to other pods
+  and do not survive the pod's termination and cleanup.
+
+RESOLUTION
+  Added a hostPath volume, mounted into every worker pod at the
+  same path. This backs the output files with storage on the
+  Kubernetes node itself, independent of any single pod's lifetime,
+  so files persist after a pod completes and remain accessible to
+  future pods.
+
+LESSON
+  Any output meant to outlive a pod, or be shared across pods,
+  requires a volume. Writing to a pod's local filesystem alone is
+  only ever a scratch space.
+
+2. DEDUP MARKER LIVING IN PROCESS MEMORY DOESN'T SURVIVE POD RESTARTS
+----------------------------------------------------------------
+ISSUE
+  An initial idea to track processed messages using in-memory Java
+  collections (a HashSet/Deque) would not have solved the
+  duplicate-processing problem above.
+
+ROOT CAUSE
+  Each worker pod is a brand new, short-lived process. Any
+  in-memory state is created empty and destroyed completely with
+  that pod. A retried pod has no access to a failed pod's memory,
+  so an in-memory dedup structure offers no protection across pod
+  boundaries -- only within a single process's lifetime.
+
+RESOLUTION
+  Moved the dedup marker to Redis, a separate, shared service
+  reachable by every pod, so state persists independently of any
+  single pod's lifecycle.
+
+LESSON
+  Deduplication and coordination state must live outside the
+  process being protected. If a component can disappear and be
+  replaced (as any pod can), its own memory cannot be the source
+  of truth for anything that needs to survive that replacement.

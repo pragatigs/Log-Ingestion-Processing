@@ -1,0 +1,115 @@
+ISSUE SUMMARY: KAFKA CONSUMER NOT READING EXISTING MESSAGES
+=============================================================
+
+Project:   Log Ingestion & Processing System
+Component: logs-worker (Spring Boot Kafka consumer)
+Date:      2026-07-12
+
+
+PROBLEM
+-------
+The Spring Boot Kafka consumer, deployed as a pod in Minikube, consistently
+returned zero messages on every poll cycle, despite five test messages being
+confirmed present in the "log-processing" topic (verified independently via
+kafka-console-consumer.sh --from-beginning).
+
+
+INVESTIGATION
+-------------
+1. Confirmed Kafka connectivity was working -- the consumer successfully
+   discovered the group coordinator, joined the consumer group, and was
+   assigned all three topic partitions without error.
+
+2. Checked consumer group offset state via kafka-consumer-groups.sh --describe:
+   - CURRENT-OFFSET was empty (-) for all partitions, confirming the group
+     "log-processing-group" had never committed an offset.
+   - LOG-END-OFFSET showed 5 messages present on partition 1 (0 on the other
+     two partitions).
+
+3. Initially suspected consumer-group rebalance latency (the app creates a
+   new KafkaConsumer per polling cycle, and group join/rebalance can take a
+   few seconds). Increased poll timeout from 600ms to 3000ms -- issue
+   persisted.
+
+4. Enabled full consumer config logging and found the actual cause:
+
+       auto.offset.reset = latest
+
+   Consumer logs confirmed the behavior directly:
+
+       Resetting offset for partition log-processing-1 to position
+       FetchPosition{offset=5, ...}
+
+   The consumer was positioning itself AFTER the last existing message
+   (offset 5, i.e. past the 5 messages at offsets 0-4) rather than at the
+   beginning.
+
+
+ROOT CAUSE
+----------
+The "auto.offset.reset" property was missing entirely from
+KafkaConsumerConfig.buildProperties(). Kafka's client defaults this setting
+to "latest" when unset.
+
+"auto.offset.reset" only takes effect when a consumer group has NO committed
+offset for a partition (a brand-new group, in this case). "latest" tells the
+consumer to skip all existing messages and wait only for new ones produced
+from that point forward -- which matched the observed behavior exactly.
+
+The rebalance-latency theory was a reasonable early hypothesis but was ruled
+out by the logs, which showed rebalance completing successfully every time;
+the consumer was simply looking in the wrong place.
+
+
+FIX
+---
+Added the missing property, defaulting to "earliest" (configurable via
+environment variable, consistent with the rest of the config):
+
+    props.put(
+        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+        System.getenv().getOrDefault("KAFKA_AUTO_OFFSET_RESET", "earliest")
+    );
+
+"earliest" tells a consumer group with no committed offset to start reading
+from the beginning of the topic instead of skipping to the end.
+
+
+RESULT
+------
+After rebuilding the Docker image and redeploying, the consumer correctly
+read all 5 backlog messages from partition 1 on the first successful poll
+after rebalance.
+
+
+FOLLOW-UP NOTE
+--------------
+This setting only governs behavior for consumer groups with no committed
+(or expired) offset. Once offset commits are wired in after batch processing
+completes, this configuration becomes irrelevant for "log-processing-group"
+going forward -- it will only matter again if the group's committed offsets
+are deleted/expired or a new group is introduced.
+
+Here's the sequence that happened:
+
+1. Consumer joins the group, gets assigned partitions.
+2. For each partition, it asks the broker: "do you have a committed offset for me?" → answer: no.
+3. Since there's no committed offset, the consumer must decide where to start. It applies your auto.offset.reset policy right then, before fetching anything:
+
+4. "earliest" → ask broker "what's your earliest available offset?" (usually 0) → set fetch position there.
+"latest" → ask broker "what's your log-end-offset (the high-water mark — one past the last message written)?" → set fetch position there.
+
+
+5. With "latest", the broker reported log-end-offset = 5 for partition 1 (since 5 messages, at offsets 0-4, were already sitting there). So the consumer set its local fetch position to 5 — meaning "start looking from position 5 onward."
+Then it calls poll(), which fetches from position 5 onward — finds nothing, because nothing's been produced past offset 4 yet.
+
+If you don't set auto.offset.reset at all, Kafka's client library falls back to its own hardcoded default, which is "latest" — that's not something Kafka assumes based on context, it's just the literal default value baked into the client library when the property is absent.
+
+hat's exactly what happened here: since AUTO_OFFSET_RESET_CONFIG was never in Properties object at all, Kafka silently applied "latest" behind the scenes — no error, no warning, it just quietly did that. That's also why it was tricky to spot initially — it doesn't fail loudly, it just makes the consumer behave as if the backlog doesn't exist.
+
+
+How Kafka fetches the latest value for offset if offset is not set?
+How it actually works - 
+Each partition on the broker keeps a running counter called the log-end-offset (LEO) — essentially "the offset the next message will get." Every time a producer writes a new message to that partition, the broker just increments this counter by one. It's updated incrementally, in real time, as writes happen — not recalculated by scanning or counting anything.
+So when your consumer asks "what's latest?", the broker doesn't count 5 messages to arrive at the number 5 — it just returns the LEO value it already has sitting in memory/metadata for that partition. It's an O(1) lookup, not an O(n) count.
+So: "latest" = the broker's already-known next-write-position for that partition, not a live count of existing messages.

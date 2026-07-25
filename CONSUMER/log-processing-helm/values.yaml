@@ -1,0 +1,50 @@
+kafka:
+  name: log-processing-cluster
+  version: "4.3.0"
+  replicas: 1
+  bootstrapServers: log-processing-cluster-kafka-bootstrap.log-processing.svc:9092
+
+  storage:
+  type: persistent-claim
+  size: 10Gi
+  deleteClaim: false
+
+  config:
+    offsetsTopicReplicationFactor: 1
+    transactionStateLogReplicationFactor: 1
+    transactionStateLogMinIsr: 1
+    defaultReplicationFactor: 1
+    minInSyncReplicas: 1
+
+  topic:
+    name: log-processing
+    partitions: 4
+    replicas: 1
+
+worker:
+  replicaCount: 1
+  # When `scaledJob.enabled` is true, KEDA's ScaledJob will determine concurrency
+  # and `replicaCount` (used by Deployments/Jobs) should be ignored.
+  scaledJob:
+    enabled: true
+  image:
+    repository: logs-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  kafka:
+    bootstrapServers: log-processing-cluster-kafka-bootstrap.log-processing.svc:9092
+    groupId: log-processing-group
+    topic: log-processing
+    maxPollRecords: "3"
+  redis:
+    redisHost: 10.99.39.122
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+service:
+  port: 7000

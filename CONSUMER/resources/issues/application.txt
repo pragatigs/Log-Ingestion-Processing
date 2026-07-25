@@ -1,0 +1,51 @@
+1. RACE CONDITION FROM A "HIGHEST OFFSET SEEN" MARKER UNDER MULTITHREADING
+----------------------------------------------------------------
+ISSUE
+  Even with Redis in place, a number of messages were silently
+  missing from the output files, despite Kafka and Redis both
+  reporting that every offset had been fully processed.
+
+ROOT CAUSE
+  The dedup check initially compared each message's offset against
+  a single "highest offset processed" marker per partition, skipping
+  anything less than or equal to it. Batches are processed by
+  multiple threads concurrently, and threads do not necessarily
+  finish in offset order. If a higher-offset message's thread
+  happened to finish first and update the marker, a lower-offset
+  message finishing afterward would be incorrectly identified as
+  "already processed" and skipped -- even though it was never
+  actually written.
+
+RESOLUTION
+  Replaced the single highest-offset marker with a Redis Set per
+  partition, checking exact membership of each specific offset
+  rather than comparing against a running maximum. This removes
+  any dependency on processing or completion order.
+
+LESSON
+  A watermark/highest-value marker is only a valid dedup strategy
+  when work is guaranteed to complete in strictly increasing order.
+  Introducing concurrency invalidates that assumption unless the
+  marker is replaced with exact, order-independent tracking.
+
+2. UNBOUNDED GROWTH OF DEDUP STATE AT SCALE
+----------------------------------------------------------------
+ISSUE (ANTICIPATED, ADDRESSED PROACTIVELY)
+  A dedup Set that only ever grows would accumulate an entry for
+  every message ever processed, indefinitely, which does not scale
+  to millions of messages over time.
+
+RESOLUTION
+  Removed each entry from the Redis Set immediately after its
+  offset is successfully committed to Kafka -- at that point, Kafka
+  itself durably guarantees the message will not be redelivered to
+  the group, so the dedup entry has served its purpose. Added a
+  refreshed TTL on each partition's Redis key as a secondary
+  safety net, catching the rare case where a pod crashes after
+  committing but before cleaning up its own dedup entries.
+
+LESSON
+  Coordination state should be cleaned up as soon as its purpose is
+  fulfilled, not left to expire on a timer alone. A time-based
+  expiry is a reasonable backstop, but the primary cleanup signal
+  should be the actual event that makes the entry unnecessary.
