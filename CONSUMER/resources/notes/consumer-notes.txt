@@ -1,0 +1,53 @@
+Simple version — what problem the consumer side solves:
+
+1. Don't pay for idle machines. Pods only spin up when there are actual logs waiting to be processed, and go away when done.
+2. Don't process slower than you need to. Each pod handles a few messages at once, in parallel, instead of one at a time.
+3. Don't lose data, and don't process the same message twice. Even if a pod crashes or gets killed mid-way (which happens often in this setup, since pods are short-lived), no log gets missed and no log gets duplicated.
+4. Don't lose the output when the pod disappears. Since pods are temporary, the files they write need to survive after the pod is gone — so output is saved somewhere that outlives the pod.
+5. Let Kubernetes know if something actually went wrong. If a batch fails, the pod tells Kubernetes clearly, so it can retry — instead of silently pretending everything worked.
+
+I. Why temp log files? Why not directly write into the main file?
+
+1. Every pod writes to the same shared file right now — more writers, more contention
+Recall your hostPath volume mounts the same directory into every pod. If every pod appended directly to info-logs.json (the "main" file) instead of a tmp file, then every concurrently running 
+pod — potentially many, since KEDA can spin up several at once under heavy lag — would be contending for the same file, all the time. Your synchronized blocks only protect threads within one
+pod; they do nothing for two different pods writing to the same file simultaneously. Right now that's tolerable because Kafka's consumer-group guarantee (one partition, one owner at a time)
+makes true simultaneous writes to the same offset unlikely — but if the main files became the direct target, you'd be relying on that same guarantee to protect the file, all the time, 
+for every write, forever — a much bigger, more constant exposure to a subtle race than an occasional retry scenario.
+
+2. The "main" files are meant to be the stable, trusted output — not something many short-lived pods repeatedly reopen
+Every pod today is disposable and short-lived by design. Having dozens of disposable processes directly append to your one long-term source of truth means any bug in any pod (a bad write,
+a crash mid-append, a malformed line) directly corrupts the permanent record, immediately, with no buffer in between. A tmp-file-per-type-then-aggregate design gives you a checkpoint: the 
+aggregator step can validate, dedupe, or reject malformed entries before they ever touch the main file — a safety boundary you lose if pods write directly to it.
+
+Basically, it's upto the developer what he wants to do next with the main log file. 
+
+II. What happens per pod and per thread?
+
+A. Per pod (= per batch, ≤3 messages)
+One pod does this once, in this order:
+
+1. Poll Kafka (single-threaded) — collects up to 3 messages, whatever partitions they land on.
+2. Submit all collected messages to a thread pool — this is where "per thread" begins.
+3. Wait for every thread to finish (Future.get() on each).
+4. Check: did all threads succeed?
+
+    a. If yes → commit offsets to Kafka (one commit call, covering the whole batch) → clean up Redis markers for each message in the batch → exit 0.
+    b. If any failed → skip commit and cleanup entirely → exit 1 → Kubernetes retries the whole pod.
+
+So commit, cleanup, and the exit code are all batch-level decisions — made once, after all threads are done, based on the combined outcome of the whole batch.
+
+B. Per thread (one thread per message in the batch)
+Each thread independently runs, for its one assigned message:
+
+1. Check Redis — is this exact offset already marked processed?
+2. If yes → skip, done (this thread's work is trivially "successful").
+3. If no → write the message to its file (info/debug/error/warn, based on partition) → mark this offset in Redis.
+4. Return success or throw an exception — this result is what the pod-level step 3 above collects.
+
+So "check → write → mark" is entirely thread-level, happening independently and concurrently for each message — a thread never talks to Kafka directly, never commits, never decides the pod's 
+exit code. It only reports back whether its one message succeeded.
+
+The dependency between the two levels:
+The batch-level commit waits for every thread to finish, and only proceeds if all of them succeeded — this is your all-or-nothing rule. A thread never commits on its own; it just does its 
+one message's work and reports back, and the pod (not the thread) is what actually talks to Kafka for committing and decides whether to exit 0 or 1.
