@@ -2,6 +2,7 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: {{ .Values.kafka.topic.name }}
+  namespace: {{ .Release.Namespace }}
   labels:
     strimzi.io/cluster: {{ .Values.kafka.name }}
 spec:

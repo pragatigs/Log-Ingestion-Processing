@@ -23,7 +23,7 @@ spec:
 
   jobTargetRef:
     backoffLimit: 3
-    ttlSecondsAfterFinished: 30000
+    ttlSecondsAfterFinished: 3000
     template:
       spec:
         restartPolicy: Never

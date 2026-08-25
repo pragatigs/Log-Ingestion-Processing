@@ -35,14 +35,35 @@ worker:
     topic: log-processing
     maxPollRecords: "3"
   redis:
-    redisHost: 10.99.39.122
+    redisHost: redis-master.log-processing.svc.cluster.local
   resources:
     requests:
       cpu: 10m
       memory: 2Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 50m
+      memory: 128Mi
+
+aggregator:
+  replicaCount: 1
+  image:
+    repository: aggregator-cron
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 10m
+      memory: 2Mi
+    limits:
+      cpu: 50m
+      memory: 128Mi
+  schedule: "5 0 * * *"
+  s3:
+    bucket: "processed-logs"
+    endpoint: "http://log-processing-floci.log-processing.svc.cluster.local:4566"
+    accessKey: "test"
+    secretKey: "test"
+    region: "us-east-1"
 
 service:
   port: 7000

@@ -14,6 +14,8 @@ public class KafkaConsumerConfig {
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, System.getenv().getOrDefault("KAFKA_MAX_POLL_RECORDS", "3"));
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, System.getenv().getOrDefault("KAFKA_AUTO_OFFSET_RESET", "earliest"));
+        props.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, System.getenv().getOrDefault("KAFKA_REQUEST_TIMEOUT_MS", "30000"));
+        props.put(ConsumerConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, System.getenv().getOrDefault("KAFKA_API_TIMEOUT_MS", "30000"));
 
         return props;
     }

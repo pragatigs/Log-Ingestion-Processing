@@ -19,7 +19,7 @@ kcat -P -b log-processing-cluster-kafka-bootstrap:9092 -t log-processing -p 1 <<
 {"id":6,"level":"DEBUG","message":"Cache miss for product catalog"}
 {"id":10,"level":"DEBUG","message":"JWT token validated"}
 {"id":14,"level":"DEBUG","message":"Retrying failed HTTP request"}
-{"id":18,"level":"DEBUG","message":"Parsing incoming JSON payload"}
+{"id":18,"level":"DEBUG","message":"Parsing incoming log payload"}
 {"id":21,"level":"DEBUG","message":"Loading application configuration"}
 {"id":22,"level":"DEBUG","message":"Connection pool initialized"}
 EOF

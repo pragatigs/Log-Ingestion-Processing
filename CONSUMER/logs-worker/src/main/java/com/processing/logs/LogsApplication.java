@@ -24,23 +24,28 @@ public class LogsApplication {
 
 		Properties props =KafkaConsumerConfig.buildProperties();
 
-		List<ConsumerRecord<String,String>> records = LogPoller.pollLogs(props);
+		LogPoller.PollResult pollResult = LogPoller.pollLogs(props);
+		List<ConsumerRecord<String,String>> records = pollResult.records();
 
 		Integer batchSize = Integer.parseInt(System.getenv().getOrDefault("KAFKA_MAX_POLL_RECORDS", "3"));
 
 		BatchExecutor batchExecutor = new BatchExecutor();
 		boolean allSucceeded = batchExecutor.processAll(records, batchSize);
 
-		if (allSucceeded){
-			OffsetCommitter.commitOffsets(records, props);
-			for (ConsumerRecord<String, String> record : records) {
-        		OffsetGuard.clearProcessed("offset-marker:partition-" + record.partition(), record.offset());
-    }
-			System.exit(0);
-		}
-		else{
-			logger.error("All messages not succeeded, hence offsets not committed");
-			System.exit(1);
+		try {
+			if (allSucceeded){
+				OffsetCommitter.commitOffsets(records, pollResult.consumer());
+				for (ConsumerRecord<String, String> record : records) {
+					OffsetGuard.clearProcessed("offset-marker:partition-" + record.partition(), record.offset());
+				}
+				System.exit(0);
+			}
+			else{
+				logger.error("All messages not succeeded, hence offsets not committed");
+				System.exit(1);
+			}
+		} finally {
+			pollResult.consumer().close();
 		}
 		
 

@@ -4,7 +4,7 @@ import redis.clients.jedis.Jedis;
 
 public class OffsetGuard {
 
-    private static final String REDIS_HOST = System.getenv().getOrDefault("REDIS_HOST", "10.99.39.122");
+    private static final String REDIS_HOST = System.getenv().getOrDefault("REDIS_HOST", "redis-service.log-processing.svc.cluster.local");
     private static final int REDIS_PORT = 6379;
 
     public static boolean isAlreadyProcessed(String partitionKey, long incomingOffset){

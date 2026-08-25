@@ -2,6 +2,7 @@ apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: {{ .Values.kafka.name }}
+  namespace: {{ .Release.Namespace }}
   annotations:
     strimzi.io/node-pools: enabled
     strimzi.io/kraft: enabled

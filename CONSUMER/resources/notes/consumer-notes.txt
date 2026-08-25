@@ -9,7 +9,7 @@ Simple version — what problem the consumer side solves:
 I. Why temp log files? Why not directly write into the main file?
 
 1. Every pod writes to the same shared file right now — more writers, more contention
-Recall your hostPath volume mounts the same directory into every pod. If every pod appended directly to info-logs.json (the "main" file) instead of a tmp file, then every concurrently running 
+Recall your hostPath volume mounts the same directory into every pod. If every pod appended directly to info-logs.log (the "main" file) instead of a tmp file, then every concurrently running 
 pod — potentially many, since KEDA can spin up several at once under heavy lag — would be contending for the same file, all the time. Your synchronized blocks only protect threads within one
 pod; they do nothing for two different pods writing to the same file simultaneously. Right now that's tolerable because Kafka's consumer-group guarantee (one partition, one owner at a time)
 makes true simultaneous writes to the same offset unlikely — but if the main files became the direct target, you'd be relying on that same guarantee to protect the file, all the time, 
