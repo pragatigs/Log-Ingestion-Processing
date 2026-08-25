@@ -1,0 +1,6 @@
+1. Aggregator starts renaming the tmp file.
+2. T1 already has the file open (grabbed its handle before or during the rename).
+3. T1 writes — since it's using its already-open handle (bound to the inode, not the name), the write lands wherever that inode now lives — which, after the rename, is under the new name. So yes: reading from the renamed file is exactly as complete and correct as reading from the original would have been, because it is the original — just renamed. Nothing was skipped, nothing was left behind.
+4. Aggregator reads every line from the renamed file (including T1's write, since it landed there), transforms each line, writes results to output.log, then uploads to S3.
+
+If a previous aggregator run is still in progress (e.g., a slow S3 upload) when the next scheduled time arrives, Forbid tells Kubernetes to skip starting a new run rather than let two aggregator instances run concurrently.

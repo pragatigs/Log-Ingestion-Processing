@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "log-processing.fullname" . }}-floci
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "log-processing.labels" . | nindent 4 }}
+    app.kubernetes.io/component: floci
+spec:
+  selector:
+    app.kubernetes.io/component: floci
+  ports:
+    - port: 4566
+      targetPort: 4566

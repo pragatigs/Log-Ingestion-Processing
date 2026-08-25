@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "log-processing.fullname" . }}-floci-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "log-processing.labels" . | nindent 4 }}
+    app.kubernetes.io/component: floci
+data:
+  01-create-bucket.sh: |
+    #!/bin/sh
+    set -eu
+
+    echo "Creating S3 bucket..."
+    aws s3 mb s3://{{ .Values.aggregator.s3.bucket }} || true
+    echo "Done."
+

@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "log-processing.fullname" . }}-floci
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "log-processing.labels" . | nindent 4 }}
+    app.kubernetes.io/component: floci
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: floci
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: floci
+    spec:
+      containers:
+        - name: floci
+          image: floci/floci:latest-compat
+          ports:
+            - containerPort: 4566
+          volumeMounts:
+            - name: floci-init
+              mountPath: /etc/floci/init/ready.d
+              readOnly: true
+      volumes:
+        - name: floci-init
+          configMap:
+            name: {{ include "log-processing.fullname" . }}-floci-init
+            defaultMode: 0755

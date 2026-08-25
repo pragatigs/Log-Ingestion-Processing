@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "log-processing.fullname" . }}-aggregator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "log-processing.labels" . | nindent 4 }}
+    app.kubernetes.io/component: aggregator
+spec:
+  schedule: {{ .Values.aggregator.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 300
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: aggregator
+              env:
+                - name: S3_BUCKET
+                  value: {{ .Values.aggregator.s3.bucket | quote }}
+                - name: S3_ENDPOINT
+                  value: {{ .Values.aggregator.s3.endpoint | quote }}
+                - name: S3_ACCESS_KEY
+                  value: {{ .Values.aggregator.s3.accessKey | quote }}
+                - name: S3_SECRET_KEY
+                  value: {{ .Values.aggregator.s3.secretKey | quote }}
+                - name: S3_REGION
+                  value: {{ .Values.aggregator.s3.region | quote }}
+              image: "{{ .Values.aggregator.image.repository }}:{{ .Values.aggregator.image.tag }}"
+              imagePullPolicy: {{ .Values.aggregator.image.pullPolicy }}
+              resources:
+                {{- toYaml .Values.aggregator.resources | nindent 16 }}
+              volumeMounts:
+                - name: log-storage
+                  mountPath: /data/log-processing
+            
+          volumes:
+            - name: log-storage
+              hostPath:
+                path: /data/log-processing
+                type: DirectoryOrCreate

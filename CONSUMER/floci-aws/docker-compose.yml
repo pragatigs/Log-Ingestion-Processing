@@ -1,0 +1,7 @@
+services:
+  floci:
+    image: floci/floci:latest-compat
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./init/ready.d:/etc/floci/init/ready.d:ro

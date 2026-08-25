@@ -1,0 +1,351 @@
+================================================================
+  LOG INGESTION & PROCESSING SYSTEM -- OPERATIONS RUNBOOK
+================================================================
+
+NAMESPACE USED THROUGHOUT: log-processing
+CHART PATH (adjust to your machine):
+  /Users/pragati/Study/Log-Ingestion-Processing/CONSUMER/log-processing-helm
+
+
+----------------------------------------------------------------
+1. DEPLOY / UPDATE (HELM)
+----------------------------------------------------------------
+
+Deploy or apply any change to values.yaml, templates, etc.:
+
+  helm upgrade log-processing \
+    /Users/pragati/Study/Log-Ingestion-Processing/CONSUMER/log-processing-helm \
+    -n log-processing \
+    -f /Users/pragati/Study/Log-Ingestion-Processing/CONSUMER/log-processing-helm/values-local.yaml
+
+Preview what would change, without applying it (always safe to run):
+
+  helm upgrade log-processing <chart-path> -n log-processing \
+    -f <values-file> --dry-run --debug
+
+Check what's currently deployed:
+
+  helm list -n log-processing
+  helm get values log-processing -n log-processing
+  helm get manifest log-processing -n log-processing
+
+
+----------------------------------------------------------------
+2. WORKER (Kafka consumer, KEDA ScaledJob)
+----------------------------------------------------------------
+
+Build the image (must run inside Minikube's Docker daemon):
+
+  eval $(minikube docker-env)
+  docker build -t log-processor:local .
+
+Delete a single stuck/completed worker Job by name:
+
+  kubectl delete job log-processing-worker -n log-processing
+
+Delete ALL worker Jobs at once (use before a clean re-test):
+
+  kubectl delete jobs -n log-processing -l app.kubernetes.io/component=worker
+
+Check ScaledJob status (READY / ACTIVE / current triggers):
+
+  kubectl get scaledjobs -n log-processing
+  kubectl describe scaledjob log-processing-worker -n log-processing
+
+Watch worker pods appear/complete in real time:
+
+  kubectl get pods -n log-processing --watch
+
+Read a specific worker pod's logs:
+
+  kubectl logs -f <pod-name> -n log-processing
+
+Check KEDA operator logs (if ScaledJob isn't reacting as expected):
+
+  kubectl logs -n keda deployment/keda-operator --tail=50
+
+
+----------------------------------------------------------------
+3. KAFKA
+----------------------------------------------------------------
+
+--- Produce test messages (kcat) ---
+
+Start an interactive kcat pod:
+
+  kubectl run kcat -n log-processing --rm -it --restart=Never \
+    --image=edenhill/kcat:1.7.1 --command -- sh
+
+Inside that shell, produce to a specific partition (-p sets partition
+number, which determines log type -- see partition map below):
+
+  kcat -b log-processing-cluster-kafka-bootstrap:9092 \
+    -t log-processing -P -p 0
+
+Then paste example messages and press Ctrl+D to send:
+
+  {"id":1,"level":"INFO","message":"User login successful"}
+  {"id":2,"level":"INFO","message":"Order created successfully"}
+  {"id":3,"level":"INFO","message":"Email notification sent"}
+
+  PARTITION MAP (current convention):
+    0 -> info      1 -> debug      2 -> error      3 -> warn
+    anything else -> anonymous (logged as unexpected)
+
+  EXAMPLE DEBUG BATCH (-p 1):
+  {"id":1,"level":"DEBUG","message":"Fetching user profile from database"}
+  {"id":2,"level":"DEBUG","message":"Cache miss for product catalog"}
+  {"id":3,"level":"DEBUG","message":"JWT token validated"}
+
+  EXAMPLE ERROR BATCH (-p 2):
+  {"id":1,"level":"ERROR","message":"Database connection timeout"}
+  {"id":2,"level":"ERROR","message":"Payment gateway returned HTTP 500"}
+  {"id":3,"level":"ERROR","message":"Redis connection refused"}
+
+  EXAMPLE WARN BATCH (-p 3):
+  {"id":1,"level":"WARN","message":"Disk usage exceeded 85%"}
+  {"id":2,"level":"WARN","message":"Memory usage above 90%"}
+  {"id":3,"level":"WARN","message":"SSL certificate expires in 15 days"}
+
+--- Verify messages landed in the topic (raw, ignores consumer group) ---
+
+  kubectl exec -it -n log-processing \
+    log-processing-cluster-log-processing-cluster-pool-0 -- \
+    /opt/kafka/bin/kafka-console-consumer.sh \
+    --bootstrap-server localhost:9092 \
+    --topic log-processing --from-beginning
+
+  (Ctrl+C to stop -- it will keep waiting for new messages otherwise)
+
+--- Check consumer group lag (what KEDA and the worker actually see) ---
+
+  kubectl exec -it -n log-processing \
+    log-processing-cluster-log-processing-cluster-pool-0 -- \
+    /opt/kafka/bin/kafka-consumer-groups.sh \
+    --bootstrap-server localhost:9092 \
+    --describe --group log-processing-group
+
+--- Reset offsets for a clean test ---
+
+  Delete the group entirely (no committed offset -- fresh start,
+  auto.offset.reset=earliest kicks in on next read):
+
+  kubectl exec -it -n log-processing \
+    log-processing-cluster-log-processing-cluster-pool-0 -- \
+    /opt/kafka/bin/kafka-consumer-groups.sh \
+    --bootstrap-server localhost:9092 \
+    --delete --group log-processing-group
+
+  (Only works while the group has no active members.)
+
+  Alternative -- reset to latest (mark everything existing as "seen"):
+
+  kubectl exec -it -n log-processing \
+    log-processing-cluster-log-processing-cluster-pool-0 -- \
+    /opt/kafka/bin/kafka-consumer-groups.sh \
+    --bootstrap-server localhost:9092 \
+    --group log-processing-group --topic log-processing \
+    --reset-offsets --to-latest --execute
+
+--- Topic maintenance ---
+
+  Describe topic (partition count, replication, etc.):
+
+  kubectl exec -it log-processing-cluster-log-processing-cluster-pool-0 \
+    -n log-processing -c kafka -- \
+    bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    --describe --topic log-processing
+
+  Delete topic (rarely needed -- recreate via Helm/Strimzi after):
+
+  kubectl exec -it -n log-processing \
+    log-processing-cluster-log-processing-cluster-pool-0 -- \
+    /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    --delete --topic log-processing
+
+--- Expose Kafka to your local machine (outside the cluster) ---
+
+  minikube service log-processing-cluster-kafka-external-bootstrap \
+    -n log-processing --url
+
+  Note: this alone is often not enough -- Kafka's client does a second,
+  broker-advertised-address hop after the first connection. See the
+  "known gotchas" section at the end of this file.
+
+
+----------------------------------------------------------------
+4. TMP LOG FILES (worker output, hostPath volume)
+----------------------------------------------------------------
+
+SSH into the Minikube node to inspect files directly:
+
+  minikube ssh
+
+Then, inside the Minikube shell:
+
+  cd /data/log-processing
+  ls
+  cat info-tmp.json
+  cat debug-tmp.json
+  cat error-tmp.json
+  cat warn-tmp.json
+  cat anonymous-tmp.json
+
+Clear all tmp files for a clean test (do this from inside minikube ssh):
+
+  sudo rm -f /data/log-processing/*.json
+  sudo rm -f /data/log-processing/*.json.processing
+
+
+----------------------------------------------------------------
+5. REDIS (offset dedup markers)
+----------------------------------------------------------------
+
+Open an interactive Redis shell:
+
+  kubectl exec -it -n log-processing redis-master-0 -- redis-cli
+
+Inside redis-cli:
+
+  List all keys:
+    KEYS *
+
+  Check a specific partition's processed-offset set:
+    SMEMBERS offset-marker:partition-0
+    SMEMBERS offset-marker:partition-1
+    SMEMBERS offset-marker:partition-2
+    SMEMBERS offset-marker:partition-3
+
+  Check remaining time-to-live on a key:
+    TTL offset-marker:partition-0
+
+  Wipe everything (clean test only -- never in a real environment):
+    FLUSHALL
+
+  Basic health check:
+    PING          (expect: PONG)
+
+
+----------------------------------------------------------------
+6. FLOCI (local S3 emulator)
+----------------------------------------------------------------
+
+Check Floci is reachable and responding (from a throwaway pod):
+
+  kubectl run debug --rm -it --restart=Never \
+    --image=curlimages/curl -n log-processing -- \
+    curl -v http://log-processing-floci.log-processing.svc.cluster.local:4566
+
+List buckets (exec directly into the Floci pod -- AWS CLI is preinstalled):
+
+  kubectl exec -it -n log-processing <floci-pod-name> -- \
+    aws --endpoint-url http://localhost:4566 s3 ls
+
+List everything inside the processed-logs bucket:
+
+  kubectl exec -it -n log-processing <floci-pod-name> -- \
+    aws --endpoint-url http://localhost:4566 \
+    s3 ls s3://processed-logs --recursive
+
+Find the Floci pod name if you don't have it handy:
+
+  kubectl get pods -n log-processing | grep floci
+
+
+----------------------------------------------------------------
+7. CRON JOB (aggregator)
+----------------------------------------------------------------
+
+Check the CronJob and its schedule:
+
+  kubectl get cronjob -n log-processing
+
+Manually trigger a run right now, without waiting for the schedule:
+
+  kubectl create job --from=cronjob/log-processing-aggregator \
+    manual-test-1 -n log-processing
+
+  (Use a new, unique job name each time -- Kubernetes won't let you
+  reuse manual-test-1 twice.)
+
+Watch it run and read its logs:
+
+  kubectl get pods -n log-processing --watch
+  kubectl logs -f <aggregator-pod-name> -n log-processing
+
+Delete a finished manual test job when done:
+
+  kubectl delete job manual-test-1 -n log-processing
+
+
+----------------------------------------------------------------
+8. FULL CLEAN END-TO-END TEST SEQUENCE
+----------------------------------------------------------------
+
+Use this whenever you want a fully clean run, start to finish.
+
+  1. Delete all worker Jobs:
+       kubectl delete jobs -n log-processing -l app.kubernetes.io/component=worker
+
+  2. Delete the Kafka consumer group (fresh offsets):
+       kubectl exec -it -n log-processing \
+         log-processing-cluster-log-processing-cluster-pool-0 -- \
+         /opt/kafka/bin/kafka-consumer-groups.sh \
+         --bootstrap-server localhost:9092 \
+         --delete --group log-processing-group
+
+  3. Flush Redis:
+       kubectl exec -it -n log-processing redis-master-0 -- redis-cli FLUSHALL
+
+  4. Clear tmp files:
+       minikube ssh
+       sudo rm -f /data/log-processing/*.json
+       sudo rm -f /data/log-processing/*.json.processing
+       exit
+
+  5. Produce a fresh batch of test messages (see section 3 examples).
+
+  6. Watch worker pods spin up and complete:
+       kubectl get pods -n log-processing --watch
+
+  7. Confirm lag is back to 0:
+       kubectl exec -it -n log-processing \
+         log-processing-cluster-log-processing-cluster-pool-0 -- \
+         /opt/kafka/bin/kafka-consumer-groups.sh \
+         --bootstrap-server localhost:9092 \
+         --describe --group log-processing-group
+
+  8. Check tmp files got written correctly (section 4).
+
+  9. Manually trigger the aggregator (section 7).
+
+  10. Confirm objects landed in Floci's S3 bucket (section 6).
+
+
+----------------------------------------------------------------
+9. KNOWN GOTCHAS (things that look like bugs but aren't)
+----------------------------------------------------------------
+
+- helm upgrade never resets Kafka offsets, Redis data, or tmp files.
+  These are separate systems from what Helm manages -- always reset
+  them manually (section 8) for a truly clean test.
+
+- "No pods running" after a burst of activity is often correct, not
+  broken -- check lag first (section 3) before assuming something's
+  stuck. Zero lag means KEDA correctly has nothing to do.
+
+- Connecting to Kafka from outside the cluster requires BOTH the
+  bootstrap connection AND the broker's advertised address to be
+  reachable -- a working port-forward/minikube service URL is not
+  enough on its own if the advertised address still points to
+  internal-only pod DNS.
+
+- The AWS S3 SDK defaults to virtual-hosted-style addressing
+  (bucket-name.endpoint), which breaks against Floci/LocalStack/any
+  non-AWS S3 endpoint. Path-style addressing must be forced
+  explicitly (forcePathStyle(true) in the S3Client builder).
+
+- kafka-consumer-groups.sh --describe only lists partitions the group
+  has a committed offset for -- a partition with real, unprocessed
+  messages can be silently absent from the output if it's never been
+  touched yet. Don't read "not listed" as "no messages."
