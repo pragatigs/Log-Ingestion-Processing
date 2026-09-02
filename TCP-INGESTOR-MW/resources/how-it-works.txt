@@ -1,0 +1,55 @@
+How each component fits together, conceptually
+
+TcpServer — opens a ServerSocket on a configurable port, sits in a loop calling accept(). Each time a new connection comes in, it doesn't handle it inline — it hands the socket off to a thread pool (so one slow/hanging connection can't block new connections from being accepted).
+
+ConnectionHandler — runs on its own thread, per connection. Reads lines from the socket in a loop (similar shape to reading from a BufferedReader), and for each line, hands it to LogRouter + KafkaLogProducer. Keeps looping until the client closes the connection or an error occurs.
+
+LogRouter — takes a raw log line (presumably JSON, matching your existing test data shape with a "level" field), parses out the log level, and maps it to a partition number — mirroring the exact convention your consumer already expects (0→info, 1→debug, 2→error, 3→warn). This is the component that actually fulfills the "producer owns partition assignment" responsibility we talked about earlier.
+
+KafkaLogProducer — a thin wrapper around a single, shared KafkaProducer<String, String> instance. Unlike your consumer's KafkaConsumer (which we deliberately kept short-lived, one per poll), a KafkaProducer is thread-safe and meant to be shared — a single instance, created once at startup, used by all connection-handler threads concurrently. Worth flagging since it's the opposite pattern from the consumer side, and easy to instinctively "fix" incorrectly if you don't remember this distinction.      
+
+
+
+Suggested build order — same bottom-up approach as the consumer
+KafkaLogProducer first — prove you can send a message to the right partition, in isolation, before any TCP code exists.
+LogRouter — pure logic, easy to test standalone (given a line, what partition does it return).
+ConnectionHandler — reads from a socket, calls the two above.
+TcpServer — accepts connections, dispatches to a thread pool running ConnectionHandler.
+main() — wires it all together, starts listening.
+
+
+TcpServer would conceptually do:
+
+Create a ServerSocket on a port, say 5000.
+Keep listening for clients.
+When a client connects, accept() returns a Socket.
+Hand that socket to a ConnectionHandler.
+ConnectionHandler reads data from the socket.
+It passes the log to LogRouter.
+LogRouter determines the Kafka partition.
+KafkaLogProducer publishes it.
+
+
+                    Spring Boot
+                        |
+                        ↓
+               TcpServerService
+                        |
+                  SmartLifecycle
+                   /          \
+              start()        stop()
+                 |              |
+                 ↓              ↓
+          ServerSocket      close socket
+                 |
+                 ↓
+           TaskExecutor
+                 |
+                 ↓
+          acceptConnections()
+                 |
+              accept()
+                 |
+        ┌────────┼────────┐
+        ↓        ↓        ↓
+     Client A Client B Client C

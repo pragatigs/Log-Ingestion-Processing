@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: ingestor
+    port: 8080
+  kafka:
+    # Replace this with your actual broker address (e.g., your Kubernetes bootstrap service)
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
