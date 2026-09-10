@@ -17,6 +17,8 @@ public class TcpServerService implements SmartLifecycle{
     private final TaskExecutor taskExecutor;
     private final ConnectionHandler connectionHandler;
 
+    private final String tcpHost = System.getenv("TCP_PORT");
+
     public TcpServerService (TaskExecutor taskExecutor, ConnectionHandler connectionHandler){
         this.taskExecutor = taskExecutor;
         this.connectionHandler = connectionHandler;
@@ -25,7 +27,8 @@ public class TcpServerService implements SmartLifecycle{
     @Override
     public void start(){
         try{
-            serverSocket =new ServerSocket(5001);
+            logger.info("--------TCP PORT------------" + tcpHost);
+            serverSocket =new ServerSocket(Integer.parseInt(tcpHost));
             logger.info("TCP Server started on port 5001");
             taskExecutor.execute(this::acceptConnections);
         }

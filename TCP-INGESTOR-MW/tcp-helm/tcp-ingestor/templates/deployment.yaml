@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+
+    spec:
+      containers:
+        - name: tcp-ingestor
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          ports:
+            - name: tcp
+              containerPort: 5001
+              protocol: TCP
+
+          env:
+            - name: TCP_PORT
+              value: {{ .Values.env.tcpPort | quote }}
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

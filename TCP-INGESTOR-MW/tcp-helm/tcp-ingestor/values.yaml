@@ -1,0 +1,22 @@
+replicaCount: 1
+
+image:
+  repository: tcp-ingestor
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 5001
+  targetPort: 5001
+
+env:
+  tcpPort: "5001"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

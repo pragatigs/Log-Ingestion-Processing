@@ -3,7 +3,7 @@ spring:
     name: ingestor
     port: 8080
   kafka:
-    # Replace this with your actual broker address (e.g., your Kubernetes bootstrap service)
+    # Replace this with your actual broker address (e.g., your Kubernetes bootstrap service). I am port-forwarding just to test
     bootstrap-servers: localhost:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer

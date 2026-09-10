@@ -1,4 +1,4 @@
-package main.java.com.tcp.simulator;
+package com.tcp.simulator;
 
 import java.io.IOException;
 import java.io.PrintWriter;
