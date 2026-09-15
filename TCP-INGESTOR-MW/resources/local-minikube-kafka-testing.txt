@@ -1,0 +1,18 @@
+Local Minikube Kafka testing findings
+
+1. Expose the Kafka service to localhost using port-forward.
+2. The bootstrap connection succeeds.
+3. When Kafka returns broker metadata for the connection target, it resolves to the service hostname such as <service-name>.svc:9094.
+4. This is expected for in-cluster service discovery.
+5. To test it from the laptop, add an entry in /etc/hosts that maps the service hostname to localhost, for example:
+
+   127.0.0.1 <service-name>.svc
+
+6. Once this mapping is added, the service hostname resolves to localhost, and the request is forwarded correctly from the laptop to the local Minikube environment.
+
+Summary:
+- Port-forward Kafka to localhost.
+- Bootstrap succeeds.
+- Broker metadata returns the .svc address, which is normal.
+- Map the .svc hostname to 127.0.0.1 in /etc/hosts.
+- This makes local testing work as expected.
