@@ -25,7 +25,7 @@
 //         System.out.println("Validating connection to Kafka bootstrap servers...");
 
 //         try (AdminClient client = AdminClient.create(kafkaAdmin.getConfigurationProperties())) {
-            
+
 //             ListTopicsOptions options = new ListTopicsOptions().timeoutMs(3000);
 //             Set<String> topics = client.listTopics(options).names().get();
 
@@ -38,10 +38,10 @@
 //             String mockJsonPayload = "{\"id\":100,\"level\":\"INFO\",\"message\":\"Spring Boot live connection test payload!\"}";
 
 //             System.out.println("Attempting to send test message to topic '" + targetTopic + "' on Partition " + targetPartition + "...");
-            
+
 //             // Sends the message without a key to your specific partition
 //             kafkaTemplate.send(targetTopic, targetPartition, null, mockJsonPayload);
-            
+
 //             System.out.println("TEST MESSAGE SENT SUCCESSFULLY!");
 
 //         } catch (Exception e) {

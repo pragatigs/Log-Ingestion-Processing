@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 public class ConnectionHandler {
     private final LogRouterService logRouterService;
     private final KafkaProducerService kafkaProducerService;
-    
+
     public ConnectionHandler(LogRouterService logRouterService, KafkaProducerService kafkaProducerService){
         this.logRouterService = logRouterService;
         this.kafkaProducerService = kafkaProducerService;
@@ -27,7 +27,7 @@ public class ConnectionHandler {
 
             while ((data = reader.readLine()) != null) {
                 System.out.println("Received: " + data);
-            
+
             int partition = logRouterService.decidePartition(data);
             kafkaProducerService.sendMessage("log-processing", partition, data);
             }

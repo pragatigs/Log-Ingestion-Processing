@@ -18,37 +18,37 @@ import org.apache.logging.log4j.Logger;
 @SpringBootApplication
 public class LogsApplication {
 
-	public static void main(String[] args) {
+    public static void main(String[] args) {
 
-		final Logger logger = LogManager.getLogger(LogsApplication.class);
+        final Logger logger = LogManager.getLogger(LogsApplication.class);
 
-		Properties props =KafkaConsumerConfig.buildProperties();
+        Properties props =KafkaConsumerConfig.buildProperties();
 
-		LogPoller.PollResult pollResult = LogPoller.pollLogs(props);
-		List<ConsumerRecord<String,String>> records = pollResult.records();
+        LogPoller.PollResult pollResult = LogPoller.pollLogs(props);
+        List<ConsumerRecord<String,String>> records = pollResult.records();
 
-		Integer batchSize = Integer.parseInt(System.getenv().getOrDefault("KAFKA_MAX_POLL_RECORDS", "3"));
+        Integer batchSize = Integer.parseInt(System.getenv().getOrDefault("KAFKA_MAX_POLL_RECORDS", "3"));
 
-		BatchExecutor batchExecutor = new BatchExecutor();
-		boolean allSucceeded = batchExecutor.processAll(records, batchSize);
+        BatchExecutor batchExecutor = new BatchExecutor();
+        boolean allSucceeded = batchExecutor.processAll(records, batchSize);
 
-		try {
-			if (allSucceeded){
-				OffsetCommitter.commitOffsets(records, pollResult.consumer());
-				for (ConsumerRecord<String, String> record : records) {
-					OffsetGuard.clearProcessed("offset-marker:partition-" + record.partition(), record.offset());
-				}
-				System.exit(0);
-			}
-			else{
-				logger.error("All messages not succeeded, hence offsets not committed");
-				System.exit(1);
-			}
-		} finally {
-			pollResult.consumer().close();
-		}
-		
+        try {
+            if (allSucceeded){
+                OffsetCommitter.commitOffsets(records, pollResult.consumer());
+                for (ConsumerRecord<String, String> record : records) {
+                    OffsetGuard.clearProcessed("offset-marker:partition-" + record.partition(), record.offset());
+                }
+                System.exit(0);
+            }
+            else{
+                logger.error("All messages not succeeded, hence offsets not committed");
+                System.exit(1);
+            }
+        } finally {
+            pollResult.consumer().close();
+        }
 
-	}
+
+    }
 
 }

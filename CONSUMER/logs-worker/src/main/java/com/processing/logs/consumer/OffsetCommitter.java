@@ -15,7 +15,7 @@ public class OffsetCommitter {
 
         public static void commitOffsets(List<ConsumerRecord<String, String>> records,
             KafkaConsumer<String, String> consumer) {
-          
+
         final Logger logger = LogManager.getLogger(OffsetCommitter.class);
 
         Map<TopicPartition, OffsetAndMetadata> offsetsToCommit = new HashMap<>();

@@ -70,5 +70,5 @@ public class TcpServerService implements SmartLifecycle{
     public boolean isRunning(){
         return serverSocket!=null && !serverSocket.isClosed();
     }
-    
+
 }

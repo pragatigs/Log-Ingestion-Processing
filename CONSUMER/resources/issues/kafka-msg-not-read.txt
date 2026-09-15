@@ -109,7 +109,7 @@ hat's exactly what happened here: since AUTO_OFFSET_RESET_CONFIG was never in Pr
 
 
 How Kafka fetches the latest value for offset if offset is not set?
-How it actually works - 
+How it actually works -
 Each partition on the broker keeps a running counter called the log-end-offset (LEO) — essentially "the offset the next message will get." Every time a producer writes a new message to that partition, the broker just increments this counter by one. It's updated incrementally, in real time, as writes happen — not recalculated by scanning or counting anything.
 So when your consumer asks "what's latest?", the broker doesn't count 5 messages to arrive at the number 5 — it just returns the LEO value it already has sitting in memory/metadata for that partition. It's an O(1) lookup, not an O(n) count.
 So: "latest" = the broker's already-known next-write-position for that partition, not a live count of existing messages.

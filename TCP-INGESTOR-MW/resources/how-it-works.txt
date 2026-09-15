@@ -6,7 +6,7 @@ ConnectionHandler — runs on its own thread, per connection. Reads lines from t
 
 LogRouter — takes a raw log line (presumably JSON, matching your existing test data shape with a "level" field), parses out the log level, and maps it to a partition number — mirroring the exact convention your consumer already expects (0→info, 1→debug, 2→error, 3→warn). This is the component that actually fulfills the "producer owns partition assignment" responsibility we talked about earlier.
 
-KafkaLogProducer — a thin wrapper around a single, shared KafkaProducer<String, String> instance. Unlike your consumer's KafkaConsumer (which we deliberately kept short-lived, one per poll), a KafkaProducer is thread-safe and meant to be shared — a single instance, created once at startup, used by all connection-handler threads concurrently. Worth flagging since it's the opposite pattern from the consumer side, and easy to instinctively "fix" incorrectly if you don't remember this distinction.      
+KafkaLogProducer — a thin wrapper around a single, shared KafkaProducer<String, String> instance. Unlike your consumer's KafkaConsumer (which we deliberately kept short-lived, one per poll), a KafkaProducer is thread-safe and meant to be shared — a single instance, created once at startup, used by all connection-handler threads concurrently. Worth flagging since it's the opposite pattern from the consumer side, and easy to instinctively "fix" incorrectly if you don't remember this distinction.
 
 
 

@@ -36,7 +36,7 @@ spec:
               volumeMounts:
                 - name: log-storage
                   mountPath: /data/log-processing
-            
+
           volumes:
             - name: log-storage
               hostPath:
