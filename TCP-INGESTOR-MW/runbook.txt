@@ -1,0 +1,129 @@
+================================================================
+  TCP INGESTOR -- OPERATIONS RUNBOOK
+================================================================
+
+MODULE PATH:
+  /Users/pragati/Study/Log-Ingestion-Processing/TCP-INGESTOR-MW/ingestor
+
+CHART PATH:
+  /Users/pragati/Study/Log-Ingestion-Processing/TCP-INGESTOR-MW/tcp-helm/tcp-ingestor
+
+TCP PORT: 5001
+KAFKA TOPIC: log-processing
+
+
+----------------------------------------------------------------
+1. RUN LOCALLY
+----------------------------------------------------------------
+
+The ingestor expects Kafka to be reachable at localhost:9092. See the
+consumer runbook's Kafka section for port-forwarding and advertised
+broker address requirements.
+
+  cd /Users/pragati/Study/Log-Ingestion-Processing/TCP-INGESTOR-MW/ingestor
+  TCP_PORT=5001 java -jar build/libs/ingestor-0.0.1-SNAPSHOT.jar
+
+The ingestor accepts one log line per TCP line and publishes each line
+to the log-processing topic.
+
+
+----------------------------------------------------------------
+2. TEST AND BUILD
+----------------------------------------------------------------
+
+Run the unit tests. TCP_PORT is required because the TCP server starts
+when the Spring test context loads:
+
+  cd /Users/pragati/Study/Log-Ingestion-Processing/TCP-INGESTOR-MW/ingestor
+  TCP_PORT=5001 ./gradlew test
+
+Build the application jar:
+
+  ./gradlew clean bootJar
+
+Build the container image inside Minikube's Docker daemon:
+
+  eval $(minikube docker-env)
+  docker build -t tcp-ingestor:latest .
+
+
+----------------------------------------------------------------
+3. DIRECT TCP SMOKE TEST
+----------------------------------------------------------------
+
+The repository script opens ten clients in parallel and sends INFO,
+DEBUG, WARN, and ERROR lines from each client:
+
+  cd /Users/pragati/Study/Log-Ingestion-Processing/TCP-INGESTOR-MW
+  ./resources/scripts/test-tcp.sh
+
+Send one JSON batch manually:
+
+  printf '%s\n' \
+    '{"id":1,"level":"INFO","message":"User login successful"}' \
+    '{"id":2,"level":"DEBUG","message":"Cache miss"}' \
+    '{"id":3,"level":"WARN","message":"Disk usage exceeded 85%"}' \
+    '{"id":4,"level":"ERROR","message":"Database connection timeout"}' \
+    | nc localhost 5001
+
+The current partition convention is:
+
+  INFO  -> partition 0
+  DEBUG -> partition 1
+  ERROR -> partition 2
+  WARN  -> partition 3
+  other -> partition 4
+
+Check the ingestor logs for received lines. Verify the Kafka records and
+consumer lag using the Kafka commands in the consumer runbook.
+
+
+----------------------------------------------------------------
+4. DEPLOY WITH HELM
+----------------------------------------------------------------
+
+Install or update the chart after building the image in Minikube:
+
+  helm upgrade --install tcp-ingestor \
+    /Users/pragati/Study/Log-Ingestion-Processing/TCP-INGESTOR-MW/tcp-helm/tcp-ingestor \
+    -n log-processing --create-namespace
+
+Check the deployment, service, and pod logs:
+
+  kubectl get deployment,service,pods -n log-processing -l app=tcp-ingestor
+  kubectl logs -f deployment/tcp-ingestor -n log-processing
+
+The chart creates a ClusterIP service named tcp-ingestor on port 5001.
+Forward it to the laptop for local TCP clients:
+
+  kubectl port-forward -n log-processing svc/tcp-ingestor 5001:5001
+
+Then run the direct smoke test or the simulator from another terminal.
+
+
+----------------------------------------------------------------
+5. KAFKA DEPLOYMENT GOTCHA
+----------------------------------------------------------------
+
+The current ingestor application config points Kafka at localhost:9092,
+and the Helm chart only supplies TCP_PORT. Inside a pod, localhost is the
+pod itself, not the Kafka service. If the in-cluster ingestor accepts TCP
+but cannot publish, check this configuration first. The Kafka bootstrap
+address must be made configurable or otherwise reachable from the pod.
+
+
+----------------------------------------------------------------
+6. END-TO-END CHECK
+----------------------------------------------------------------
+
+  1. Make Kafka reachable at localhost:9092 for a local ingestor.
+  2. Start the ingestor with TCP_PORT=5001.
+  3. Run the simulator from /Users/pragati/Study/Log-Ingestion-Processing/simulator.
+  4. Confirm four received lines in the ingestor logs.
+  5. Check Kafka records and consumer lag.
+  6. Watch worker pods and inspect tmp files.
+  7. Run the aggregator and verify objects in Floci.
+
+For a Minikube variation, deploy this chart, port-forward svc/tcp-ingestor
+to localhost:5001, and run the simulator locally. Resolve the Kafka
+bootstrap limitation above before expecting the pod to publish.

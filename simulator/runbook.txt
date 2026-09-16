@@ -1,0 +1,89 @@
+================================================================
+  LOG TRAFFIC SIMULATOR -- OPERATIONS RUNBOOK
+================================================================
+
+MODULE PATH:
+  /Users/pragati/Study/Log-Ingestion-Processing/simulator
+
+TARGET:
+  localhost:5001
+
+
+----------------------------------------------------------------
+1. PURPOSE
+----------------------------------------------------------------
+
+The simulator is a one-shot TCP client. It connects to localhost:5001,
+sends four JSON log records, and closes the connection.
+
+The records are:
+
+  INFO  - Payment received
+  DEBUG - Processing payment
+  WARN  - Payment processing is slow
+  ERROR - Payment failed
+
+The simulator does not process Kafka messages or write output files.
+Those checks belong to the TCP ingestor and consumer runbooks.
+
+
+----------------------------------------------------------------
+2. RUN LOCALLY
+----------------------------------------------------------------
+
+Start the TCP ingestor first. Then run the simulator from another
+terminal:
+
+  cd /Users/pragati/Study/Log-Ingestion-Processing/simulator
+  java -jar build/libs/simulator-0.0.1-SNAPSHOT.jar
+
+The application sends its batch once and exits. If the connection fails,
+confirm that a TCP listener is available at localhost:5001.
+
+
+----------------------------------------------------------------
+3. BUILD AND TEST
+----------------------------------------------------------------
+
+Run the simulator tests:
+
+  cd /Users/pragati/Study/Log-Ingestion-Processing/simulator
+  ./gradlew clean test
+
+Build the runnable jar:
+
+  ./gradlew clean bootJar
+
+
+----------------------------------------------------------------
+4. RUN AGAINST MINIKUBE
+----------------------------------------------------------------
+
+Deploy the TCP ingestor using its runbook, then forward the service to
+the simulator's hardcoded local target:
+
+  kubectl port-forward -n log-processing svc/tcp-ingestor 5001:5001
+
+In another terminal, run:
+
+  cd /Users/pragati/Study/Log-Ingestion-Processing/simulator
+  java -jar build/libs/simulator-0.0.1-SNAPSHOT.jar
+
+After the simulator exits, check the ingestor logs and use the consumer
+runbook's Kafka, worker, tmp-file, and Floci checks to verify the rest of
+the pipeline.
+
+
+----------------------------------------------------------------
+5. END-TO-END CHECK
+----------------------------------------------------------------
+
+  1. Start the TCP ingestor or port-forward svc/tcp-ingestor.
+  2. Run java -jar build/libs/simulator-0.0.1-SNAPSHOT.jar from this directory.
+  3. Confirm four lines were received by the ingestor.
+  4. Confirm INFO, DEBUG, WARN, and ERROR reached Kafka.
+  5. Confirm consumer lag returns to zero and output is written.
+  6. Run the aggregator and verify the Floci bucket.
+
+The simulator currently has no host or port command-line option. Its TCP
+destination is hardcoded in TcpPusher.java as localhost:5001.
